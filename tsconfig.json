@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "experimentalDecorators": true,
+    "target": "es2022",
+    "module": "commonjs",
+    "declaration": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "src",
+    "baseUrl": "./src",
+    "pretty": true,
+    "noImplicitReturns": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": false,
+    "strictPropertyInitialization": false,
+    "strictNullChecks": false,
+    "emitDecoratorMetadata": true,
+    "esModuleInterop": true,
+    "paths": {
+      "@errors": ["./lib/errors"],
+      "@database": ["./lib/database"],
+      "@utils": ["./lib/utils"]
+    }
+  },
+  "include": ["src/"],
+  "exclude": ["node_modules", "**/*.e2e.spec.ts"]
+}

@@ -1,0 +1,32 @@
+# Versioning and metadata
+.git
+.gitignore
+.dockerignore
+
+# Build dependencies
+dist
+node_modules
+coverage
+
+# Environment (contains sensitive data)
+.env
+
+# Files not required for production
+.editorconfig
+Dockerfile
+README.md
+tslint.json
+nodemon.json
+manifests
+deployments
+.github
+
+# OS
+.DS_Store
+
+# Tests
+/coverage
+/.nyc_output
+jest_html_reporters.html
+jest_html_reporters.html
+jest-html-reporters-attach/*

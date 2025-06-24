@@ -1,0 +1,15 @@
+{
+    "name": "eaas-example",
+    "main": "index.ts",
+    "devDependencies": {
+        "@types/node": "^16.18.39"
+    },
+    "dependencies": {
+        "@pulumi/aws": "^5.42.0",
+        "@pulumi/awsx": "^1.0.2",
+        "@pulumi/kubernetes": "^3.30.2",
+        "@pulumi/pulumi": "^3.76.0",
+        "cmd-ts": "^0.12.1",
+        "dotenv": "^16.4.1"
+    }
+}

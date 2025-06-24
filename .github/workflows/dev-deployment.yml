@@ -1,0 +1,77 @@
+name: Deploy to dev cluster
+on: 
+  push:
+    branches:
+      - master
+
+env:
+  AWS_REGION: "af-south-1" # TODO: Replace with your AWS region
+  AWS_ACCOUNT_ID: "067333984569" # TODO: Replace with your AWS account ID
+  CLUSTER_NAME: "eaas-dev" # TODO: Replace with your EKS cluster name
+  NAMESPACE: "mobile-money-template" # TODO: Repalce with your EKS namespace
+  PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+
+permissions:
+  id-token: write # This is required for requesting the JWT through OIDC
+  contents: read # This is required for actions/checkout
+jobs:
+  DevClusterDeployment:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v2
+        with:
+          node-version: 18
+      - uses: unfor19/install-aws-cli-action@master
+      - uses: bazelbuild/setup-bazelisk@v2
+      - name: Git clone the repository
+        uses: actions/checkout@v3
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/gha_oidc_assume_role"
+          role-session-name: samplerolesession
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install and configure kubectl
+        run: |
+          VERSION=$(curl --silent https://storage.googleapis.com/kubernetes-release/release/stable.txt)
+          curl https://storage.googleapis.com/kubernetes-release/release/$VERSION/bin/linux/amd64/kubectl \
+              --progress-bar \
+              --location \
+              --remote-name
+          chmod +x kubectl
+
+      - name: Update EKS Config
+        run: |
+          aws eks --region ${{ env.AWS_REGION }} update-kubeconfig --name ${{ env.CLUSTER_NAME }}
+          kubectl config set-context --current --namespace=${{ env.NAMESPACE }}
+          kubectl config use-context arn:aws:eks:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:cluster/${{ env.CLUSTER_NAME }}
+
+      - name: Install Nest CLI
+        run: npm install -g @nestjs/cli
+
+      - name: Mount bazel cache # Optional
+        uses: actions/cache@v3
+        with:
+          path: "~/.cache/bazel"
+          key: bazel
+
+      - name: Install Dependencies
+        run: bazelisk run -- @pnpm//:pnpm --dir $PWD install --lockfile-only
+
+      - name: Push OCI image to ECR
+        run: |
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          bazelisk run //:push_image --platforms=//:linux_arm64
+      
+      - name: Destroy previous dev deployment
+        run: |
+          kubectl delete service ${{ env.NAMESPACE }}-service -n ${{ env.NAMESPACE }}
+          kubectl delete deployment ${{ env.NAMESPACE }}-deployment -n ${{ env.NAMESPACE }}
+        continue-on-error: true
+
+      - name: Deploy to dev deployment
+        run: bazelisk run //manifests:deploy

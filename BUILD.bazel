@@ -1,0 +1,227 @@
+load("@aspect_rules_swc//swc:defs.bzl", "swc")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_image_layer", "js_run_binary")
+load("@bazel_skylib//lib:partial.bzl", "partial")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@pnpm__links//:defs.bzl", npm_link_pnpm = "npm_link_imported_package")
+load("@container_structure_test//:defs.bzl", "container_structure_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_image_index", "oci_push", "oci_tarball")
+load("@aspect_bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("//tools:stamp_tags.bzl", "stamp_tags")
+load("//tools:multiarch.bzl", "multi_arch")
+
+# TODO: update this value to match your AWS account ID
+aws_account_id = "067333984569"
+project_name = "mobile-money-template"
+ecr_repository_name = "mobile-money-template-dev-repository"
+
+npm_link_all_packages(
+    name = "node_modules",
+    imported_links = [
+        npm_link_pnpm,
+    ],
+)
+
+# Generates a version.txt that we can then load in our pulumi rules/codes etc.
+genrule(
+    name = "version",
+    outs = ["version.txt"],
+    cmd_bash = "sed -n 's/STABLE_BUILD_VERSION //p' bazel-out/stable-status.txt |tee $@",
+    stamp = True,
+    visibility = ["//visibility:public"],
+)
+
+platform(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:arm64",
+    ],
+)
+
+platform(
+    name = "linux_amd64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+#https://github.com/aspect-build/rules_swc/tree/main/examples/generate_swcrc
+# Generates the .swcrc file from the tsconfig file.
+#
+#js_run_binary(
+#    name = "write_swcrc",
+#    tool = "//tools:converter",
+#    chdir = package_name(),
+#    args = ["./tsconfig.json"],
+#    srcs = ["tsconfig.json"],
+#    stdout = ".swcrc",
+#)
+
+# For more information about using swc to transpile please see the ts_project_transpiler example
+ts_project(
+    name = "swc",
+    srcs = glob(['src/**/*.ts']),
+    declaration = True,
+    source_map = True,
+    transpiler = partial.make(
+        swc,
+        swcrc = ".swcrc",
+    ),
+    deps = glob([":node_modules/**"]),
+)
+
+js_library(
+    name = "_env",
+    srcs = [".env"],
+    visibility = ["//visibility:public"],
+)
+
+js_binary(
+    name = "local",
+    data = [
+        ":swc",
+        # Added by swc during transpilation and used at runtime
+        ":node_modules/regenerator-runtime",
+        ".env",
+        "keys/private.key",
+        "keys/public.pem",
+    ],
+    entry_point = "src/main.js",
+)
+
+js_binary(
+    name = "bin",
+    data = [
+        ":swc",
+        # Added by swc during transpilation and used at runtime
+        ":node_modules/regenerator-runtime",
+        ":node_modules/@nestjs/axios",
+        ":node_modules/@nestjs/common",
+        ":node_modules/@nestjs/core",
+        ":node_modules/@nestjs/platform-express",
+        ":node_modules/@nestjs/terminus",
+        ":node_modules/@nestjs/typeorm",
+        ":node_modules/axios",
+        ":node_modules/class-transformer",
+        ":node_modules/class-validator",
+        ":node_modules/dotenv",
+        ":node_modules/mysql",
+        ":node_modules/mysql2",
+        ":node_modules/reflect-metadata",
+        ":node_modules/rxjs",
+        ":node_modules/source-map-support",
+        ":node_modules/ts-node",
+        ":node_modules/typeorm",
+        ":node_modules/node-rsa",
+        "keys/private.key",
+        "keys/public.pem",
+    ],
+    node_toolchain = select({
+        "@platforms//cpu:arm64": "@nodejs_linux_arm64//:node_toolchain",
+        "@platforms//cpu:x86_64": "@nodejs_linux_amd64//:node_toolchain",
+    }),
+    entry_point = "src/main.js",
+)
+
+js_image_layer(
+    name = "layers",
+    binary = ":bin",
+    platform = select({
+        "@platforms//cpu:arm64": ":linux_arm64",
+        "@platforms//cpu:x86_64": ":linux_amd64",
+    }),
+    root = "/app",
+    visibility = ["//visibility:__pkg__"],
+)
+
+oci_image(
+    name = "image",
+    # Since js_binary depends on bash we have to bring in a base image that has bash
+    base = "@debian",
+    # This is going to be /{root of js_image_layer}/{package_name()}/{name of js_binary}
+    cmd = [
+        "-c",
+        "/app/bin",
+    ],
+    entrypoint = ["/bin/bash"],
+    # This needs to be done with stamping etc, later
+    labels = {
+        "org.opencontainers.image.version": """($stamp.STABLE_BUILD_VERSION // "MISSING")""",
+    },
+    tars = [
+        ":layers",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+platform_transition_filegroup(
+    name = "transitioned_image",
+    srcs = [":image"],
+    target_platform = select({
+        "@platforms//cpu:arm64": ":linux_arm64",
+        "@platforms//cpu:x86_64": ":linux_amd64",
+    }),
+)
+
+container_structure_test(
+    name = "image_test",
+    configs = ["test.yaml"],
+    image = ":transitioned_image",
+    # ./image_test.image: line 214: /usr/bin/docker: No such file or directory
+    tags = ["no-remote-exec"],
+)
+
+# Use this when refactoring to simplify the build process and reduce repitition
+# Will build images for all listed platforms.
+multi_arch(
+    name = "images",
+    image = ":image",
+    platforms = [
+        "//:linux_arm64",
+        "//:linux_amd64",
+    ],
+)
+
+oci_tarball(
+   name = "tarball",
+   image = ":image",
+   repo_tags = ["dev/" + project_name + ":latest"],
+)
+
+oci_push(
+    name = "push_image",
+    image = ":transitioned_image",
+    remote_tags = ":stamped",
+    repository = aws_account_id + ".dkr.ecr.af-south-1.amazonaws.com/" + ecr_repository_name,
+)
+
+# Push all images
+oci_push(
+    name = "push_image_index",
+    image = ":image_index",
+    remote_tags = ":stamped",
+    repository = aws_account_id + ".dkr.ecr.af-south-1.amazonaws.com/" + ecr_repository_name,
+    visibility = ["//visibility:public"],
+)
+
+oci_image_index(
+    name = "image_index",
+    images = [
+        ":images",
+    ],
+)
+
+stamp_tags(
+    name = "stamped",
+    repotags = [
+        """($stamp.STABLE_BUILD_VERSION // "MISSING")""",
+        """($stamp.STABLE_GIT_COMMIT // "MISSING")""",
+        """($stamp.STABLE_USER_NAME // "MISSING")""",
+        "latest",
+    ],
+    visibility = ["//visibility:public"],
+)
+

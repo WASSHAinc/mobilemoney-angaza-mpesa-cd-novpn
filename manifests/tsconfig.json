@@ -1,0 +1,20 @@
+// https://docs.aspect.build/rules/aspect_rules_swc/docs/tsconfig/
+{
+    "compilerOptions": {
+        "strict": true,
+        "outDir": "bin",
+        "target": "es2020",
+        "module": "commonjs",
+        "moduleResolution": "node",
+        "declaration": true,
+        "sourceMap": true,
+        "experimentalDecorators": true,
+        "pretty": true,
+        "noFallthroughCasesInSwitch": true,
+        "noImplicitReturns": true,
+        "forceConsistentCasingInFileNames": true
+    },
+    "files": [
+        "index.ts"
+    ]
+}
