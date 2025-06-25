@@ -1,0 +1,3 @@
+name: mobilemoney-angaza-mpesa-cd-novpn
+runtime: nodejs
+description: mobile money angaza integration for CD/DRC
